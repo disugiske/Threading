@@ -130,7 +130,10 @@ def worker(bar, device_memc, options):
         else:
             errors += 1
         q.task_done()
-    err_rate = float(errors) / processed
+    if processed == 0:
+        err_rate = 1
+    else:
+        err_rate = float(errors) / processed
     if err_rate < NORMAL_ERR_RATE:
         logging.info(f"Thread: {threading.current_thread().name}. "
                      f"Acceptable error rate ({err_rate}). Successfull load")
