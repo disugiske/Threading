@@ -19,6 +19,8 @@ import appsinstalled_pb2
 import memcache
 
 NORMAL_ERR_RATE = 0.01
+RETRY = 1
+TIMEOUT = 1
 AppsInstalled = collections.namedtuple("AppsInstalled", ["dev_type", "dev_id", "lat", "lon", "apps"])
 threads = 5
 q = queue.Queue()
@@ -31,11 +33,26 @@ class PresistentConnect:
         self.memc_addr = memc_addr
         self.pool = {}
 
+    def set(self, *args, **kwargs):
+        memc = self.connect()
+        set_res = memc.set(*args, **kwargs)
+        if not set_res:
+            for i in range(RETRY):
+                logging.error(f'Connection error')
+                set_res = memc.set(*args, **kwargs)
+                if set_res:
+                    break
+                if i == RETRY-1:
+                    raise ConnectionError
+                time.sleep(TIMEOUT)
+
+
     def connect(self):
         if self.memc_addr in self.pool:
             return self.pool[self.memc_addr]
         self.pool[self.memc_addr] = memcache.Client([self.memc_addr])
         return self.pool[self.memc_addr]
+
 
 
 def dot_rename(path):
@@ -47,20 +64,18 @@ def dot_rename(path):
 
 
 def insert_appsinstalled(memc_addr, appsinstalled, dry_run=False):
-    print("connections: ", memc_addr)
     ua = appsinstalled_pb2.UserApps()
     ua.lat = appsinstalled.lat
     ua.lon = appsinstalled.lon
     key = "%s:%s" % (appsinstalled.dev_type, appsinstalled.dev_id)
     ua.apps.extend(appsinstalled.apps)
     packed = ua.SerializeToString()
-    # @TODO persistent connection
-    # @TODO retry and timeouts!
     try:
         if dry_run:
             logging.debug("%s - %s -> %s" % (memc_addr, key, str(ua).replace("\n", " ")))
         else:
-            memc = PresistentConnect(memc_addr).connect()
+            memcache.Client([memc_addr])
+            memc = PresistentConnect(memc_addr)
             memc.set(key, packed)
     except Exception as e:
         logging.exception("Cannot write to memc %s: %s" % (memc_addr, e))
