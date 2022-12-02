@@ -37,8 +37,8 @@ class PresistentConnect:
         memc = self.connect()
         set_res = memc.set(*args, **kwargs)
         if not set_res:
+            logging.error('Connection error')
             for i in range(RETRY):
-                logging.error(f'Connection error')
                 set_res = memc.set(*args, **kwargs)
                 if set_res:
                     break
@@ -74,7 +74,6 @@ def insert_appsinstalled(memc_addr, appsinstalled, dry_run=False):
         if dry_run:
             logging.debug("%s - %s -> %s" % (memc_addr, key, str(ua).replace("\n", " ")))
         else:
-            memcache.Client([memc_addr])
             memc = PresistentConnect(memc_addr)
             memc.set(key, packed)
     except Exception as e:
