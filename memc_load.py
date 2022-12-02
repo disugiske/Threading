@@ -22,9 +22,20 @@ NORMAL_ERR_RATE = 0.01
 AppsInstalled = collections.namedtuple("AppsInstalled", ["dev_type", "dev_id", "lat", "lon", "apps"])
 threads = 5
 q = queue.Queue()
-q2 = queue.Queue()
 barrier = threading.Barrier(threads)
 thr = []
+
+
+class PresistentConnect:
+    def __init__(self, memc_addr):
+        self.memc_addr = memc_addr
+        self.pool = {}
+
+    def connect(self):
+        if self.memc_addr in self.pool:
+            return self.pool[self.memc_addr]
+        self.pool[self.memc_addr] = memcache.Client([self.memc_addr])
+        return self.pool[self.memc_addr]
 
 
 def dot_rename(path):
@@ -34,7 +45,9 @@ def dot_rename(path):
         os.rename(path, os.path.join(head, "." + fn))
 
 
+
 def insert_appsinstalled(memc_addr, appsinstalled, dry_run=False):
+    print("connections: ", memc_addr)
     ua = appsinstalled_pb2.UserApps()
     ua.lat = appsinstalled.lat
     ua.lon = appsinstalled.lon
@@ -47,7 +60,7 @@ def insert_appsinstalled(memc_addr, appsinstalled, dry_run=False):
         if dry_run:
             logging.debug("%s - %s -> %s" % (memc_addr, key, str(ua).replace("\n", " ")))
         else:
-            memc = memcache.Client([memc_addr])
+            memc = PresistentConnect(memc_addr).connect()
             memc.set(key, packed)
     except Exception as e:
         logging.exception("Cannot write to memc %s: %s" % (memc_addr, e))
@@ -104,9 +117,11 @@ def worker(bar, device_memc, options):
         q.task_done()
     err_rate = float(errors) / processed
     if err_rate < NORMAL_ERR_RATE:
-        logging.info(f"Thread: {threading.current_thread().name}. Acceptable error rate ({err_rate}). Successfull load")
+        logging.info(f"Thread: {threading.current_thread().name}. "
+                     f"Acceptable error rate ({err_rate}). Successfull load")
     else:
-        logging.error("High error rate (%s > %s). Failed load" % (err_rate, NORMAL_ERR_RATE))
+        logging.error(f"Thread: {threading.current_thread().name}. "
+                      "High error rate (%s > %s). Failed load" % (err_rate, NORMAL_ERR_RATE))
 
 
 def thread_queue(device_memc, options):
